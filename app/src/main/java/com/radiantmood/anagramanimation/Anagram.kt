@@ -109,7 +109,7 @@ fun AnimatedAnagram(
     val (currentStep, updateStep) = remember { mutableStateOf(0) }
     val anagramManager by remember { mutableStateOf(AnagramAnimationManager(start, end)) }
 
-    // TODO: put these vertical/horizontal animating values inside of the AnagramState
+    // TODO: put these vertical/horizontal animating values inside of the AnagramState (would a transitionDefinition work? can you snapTo with those?)
     // TODO: switch vertical movement to Animatable
     var targetVerticalMovement by remember(currentStep) { mutableStateOf(0f) }
     val verticalMovement by animateFloatAsState(targetValue = targetVerticalMovement, tween(250 * durationMultiplier))
