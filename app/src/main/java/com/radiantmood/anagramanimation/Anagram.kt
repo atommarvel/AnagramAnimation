@@ -192,10 +192,10 @@ fun AnimatedAnagram(
         val duckLerp = lerp(jumpEnd, jumpStart, horizontalMovement)
 
         layout(compWidth, compHeight) {
-            // TODO: place jump and duck placeable separately from placeablez iteration
+            // TODO: place jump and duck placeable separately from placeables iteration
             placeablesSorted.forEachIndexed { index, placeable ->
-                val y =
-                    midHeight - (placeable.height / 2) // TODO: simplify y logic to mention relative placement to be easier to read
+                // TODO: simplify y logic to mention relative placement to be easier to read
+                val y = midHeight - (placeable.height / 2)
                 when (index) {
                     anagramManager.currentJumpingCharacterIndex -> placeable.placeRelative(jumpLerp, y + yPos[index])
                     anagramManager.currentDuckingCharacterIndex -> placeable.placeRelative(duckLerp, y + yPos[index])
