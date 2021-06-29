@@ -14,9 +14,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 // TODO: structuring this as some sort of rememberAnagramState composable function would be cool
 @OptIn(ExperimentalStdlibApi::class)
@@ -145,8 +145,6 @@ fun AnimatedAnagram(
             }
         }
     }
-    // TODO: how do I best respect parent layouts of my custom layout?
-    // TODO: how do I best respect alignment/arrangement from parent layouts?
     Layout(content = {
         start.forEach { Text(it.toString(), style = MaterialTheme.typography.h4) }
     }, modifier = Modifier.background(Color.Red)) { measurables, constraint ->
@@ -155,16 +153,14 @@ fun AnimatedAnagram(
         val placeables = measurables.map { it.measure(constraint) }
         val placeablesSorted = anagramManager.getIndexIterator().map { placeables[it] }
 
-        // tween space where moving characters live between the widths of the two characters
+        // lerp space where moving characters live between the widths of the two characters
         val jumpingPlaceable = placeablesSorted[anagramManager.currentJumpingCharacterIndex]
         val duckingPlaceable = placeablesSorted[anagramManager.currentDuckingCharacterIndex]
-        val jumpPlaceHolderDelta = duckingPlaceable.width - jumpingPlaceable.width
-        val duckPlaceHolderDelta = -jumpPlaceHolderDelta
-        val jumpPlaceholderWidth = jumpingPlaceable.width + (jumpPlaceHolderDelta * horizontalMovement)
-        val duckPlaceholderWidth = duckingPlaceable.width + (duckPlaceHolderDelta * horizontalMovement)
+        val jumpPlaceholderWidth = lerp(duckingPlaceable.width, jumpingPlaceable.width, horizontalMovement)
+        val duckPlaceholderWidth = lerp(jumpingPlaceable.width, duckingPlaceable.width, horizontalMovement)
 
         // calculate x,y positions for each letter
-        val xPos = IntArray(measurables.size + 1) { 0 }
+        val xPos = IntArray(measurables.size + 1) { 0 } // TODO: get rid of + 1
         val yPos = IntArray(measurables.size + 1) { 0 }
         for (i in 1 until xPos.size) {
             val prevI = i - 1
@@ -172,11 +168,11 @@ fun AnimatedAnagram(
             when (prevI) {
                 anagramManager.currentJumpingCharacterIndex -> {
                     yPos[prevI] = height
-                    xPos[i] = (xPos[prevI] + duckPlaceholderWidth).roundToInt()
+                    xPos[i] = (xPos[prevI] + jumpPlaceholderWidth)
                 }
                 anagramManager.currentDuckingCharacterIndex -> {
                     yPos[prevI] = -height
-                    xPos[i] = (xPos[prevI] + jumpPlaceholderWidth).roundToInt()
+                    xPos[i] = (xPos[prevI] + duckPlaceholderWidth)
                 }
                 else -> {
                     xPos[i] = xPos[prevI] + placeable.width
@@ -184,26 +180,26 @@ fun AnimatedAnagram(
             }
         }
 
+        val tallestChar: Int = placeables.maxOf { it.height } // TODO: find in above for loop
+        val compWidth = xPos[xPos.lastIndex]
+        val compHeight = tallestChar + ((jumpHeight.roundToPx()) * 2)
+        val midHeight = compHeight / 2
+
         // character horizontal movement
         val jumpStart = xPos[anagramManager.currentDuckingCharacterIndex]
         val jumpEnd = xPos[anagramManager.currentJumpingCharacterIndex]
-        val jumpTranslation = jumpEnd - jumpStart
-        val jumpInterp = (jumpStart + (jumpTranslation * horizontalMovement)).roundToInt()
-        val duckInterp = (jumpEnd + ((jumpStart - jumpEnd) * horizontalMovement)).roundToInt()
+        val jumpLerp = lerp(jumpStart, jumpEnd, horizontalMovement)
+        val duckLerp = lerp(jumpEnd, jumpStart, horizontalMovement)
 
-        layout(constraint.minWidth, constraint.minHeight) {
+        layout(compWidth, compHeight) {
             // TODO: place jump and duck placeable separately from placeablez iteration
             placeablesSorted.forEachIndexed { index, placeable ->
+                val y =
+                    midHeight - (placeable.height / 2) // TODO: simplify y logic to mention relative placement to be easier to read
                 when (index) {
-                    anagramManager.currentJumpingCharacterIndex -> {
-                        placeable.placeRelative(jumpInterp, yPos[index])
-                    }
-                    anagramManager.currentDuckingCharacterIndex -> {
-                        placeable.placeRelative(duckInterp, yPos[index])
-                    }
-                    else -> {
-                        placeable.placeRelative(xPos[index], yPos[index])
-                    }
+                    anagramManager.currentJumpingCharacterIndex -> placeable.placeRelative(jumpLerp, y + yPos[index])
+                    anagramManager.currentDuckingCharacterIndex -> placeable.placeRelative(duckLerp, y + yPos[index])
+                    else -> placeable.placeRelative(xPos[index], y + yPos[index])
                 }
             }
         }
