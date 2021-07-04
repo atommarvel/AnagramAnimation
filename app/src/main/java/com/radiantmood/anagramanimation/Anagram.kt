@@ -3,7 +3,6 @@ package com.radiantmood.anagramanimation
 import android.util.Log
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.material.MaterialTheme
@@ -17,15 +16,62 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
-// TODO: structuring this as some sort of rememberAnagramState composable function would be cool
+class AnagramTransitionData(
+    hopFraction: State<Float>,
+    strafeFraction: State<Float>,
+) {
+    val hopFraction by hopFraction
+    val strafeFraction by strafeFraction
+}
+
+@Composable
+fun updateAnagramTransition(anagramManager: AnagramAnimationManager): AnagramTransitionData {
+    val durationMultiplier = 1
+    val stepDuration = 500L * durationMultiplier
+    val strafeDuration = (1f * stepDuration).roundToInt()
+    val hopDuration = (.5f * stepDuration).roundToInt()
+    val fastInFastOut = CubicBezierEasing(0.4f, 0.0f, 0.4f, 1.0f)
+
+//    val anagramManager by remember { mutableStateOf(AnagramAnimationManagerV2()) }
+    var string by remember { mutableStateOf(anagramManager.currentString) }
+    val strafeFraction = remember(string) { Animatable(0f) }
+    val hopFraction = remember(string) { Animatable(0f) }
+
+    LaunchedEffect(string) {
+        launch {
+            strafeFraction.animateTo(1f, tween(strafeDuration, easing = fastInFastOut))
+        }
+        launch {
+            hopFraction.animateTo(1f, tween(hopDuration, easing = fastInFastOut))
+        }
+        launch {
+            delay(hopDuration.toLong())
+            hopFraction.animateTo(0f, tween(hopDuration, easing = fastInFastOut))
+        }
+        delay(stepDuration)
+        if (!anagramManager.hasReachedEnd) {
+            anagramManager.stepForward()
+            string = anagramManager.currentString
+        }
+    }
+    // TODO: why does this remember make all the difference?
+    return remember(string) { AnagramTransitionData(hopFraction.asState(), strafeFraction.asState()) }
+}
+
 @OptIn(ExperimentalStdlibApi::class)
-class AnagramAnimationManager(val start: String, val end: String) {
+class AnagramAnimationManager(
+    val start: String = "@radiantmood",
+    val end: String = "atom@android",
+) {
     val length = start.length
     var currentStep: Int = -1
     val currentOrder = buildList { repeat(start.length) { add(it) } }.toMutableList()
     var currentJumpingCharacterIndex = -1
     var currentDuckingCharacterIndex = -1
+    var currentString = start
+    var hasReachedEnd = false
 
     init {
         stepForward()
@@ -39,7 +85,8 @@ class AnagramAnimationManager(val start: String, val end: String) {
 
     fun swapCurrentStep() {
         increaseStepUntilInvalidCharPlacementFound()
-        if (currentStep < length) {
+        hasReachedEnd = currentStep + 1 >= length
+        if (!hasReachedEnd) {
             Log.d("araiff", "swapping!")
             val targetChar = end[currentStep]
             val startingIndex = getIndexIterator()
@@ -52,6 +99,12 @@ class AnagramAnimationManager(val start: String, val end: String) {
             // TODO: get ducking character into its final slot as well!
             currentOrder[startingIndex] = destinationValue
             currentOrder[currentStep] = startingValue
+
+            currentString = buildString {
+                getIndexIterator().forEach {
+                    append(start[it])
+                }
+            }
         }
     }
 
@@ -102,62 +155,26 @@ fun AnimatedAnagram(
     start: String = "@radiantmood",
     end: String = "atom@android",
     jumpHeight: Dp = 30.dp,
-    shouldAnimate: Boolean = true,
 ) {
-    val durationMultiplier = 1
     // lift char to move + create spacing for char destination
-    val (currentStep, updateStep) = remember { mutableStateOf(0) }
     val anagramManager by remember { mutableStateOf(AnagramAnimationManager(start, end)) }
+    val anagramTransitionData = updateAnagramTransition(anagramManager)
 
-    // TODO: put these vertical/horizontal animating values inside of the AnagramState (would a transitionDefinition work? can you snapTo with those?)
-    // TODO: switch vertical movement to Animatable
-    var targetVerticalMovement by remember(currentStep) { mutableStateOf(0f) }
-    val verticalMovement by animateFloatAsState(targetValue = targetVerticalMovement, tween(250 * durationMultiplier))
-
-    val horizontalMovementAnimatable = remember { Animatable(0f) }
-    val horizontalMovement by horizontalMovementAnimatable.asState()
-
-    if (shouldAnimate) {
-        LaunchedEffect(start + end, currentStep) {
-            Log.d("araiff", "launching animation with step $currentStep")
-            if (currentStep == 0) {
-                delay(2000)
-            }
-            launch {
-                horizontalMovementAnimatable.animateTo(
-                    1f,
-                    tween(
-                        durationMillis = 500 * durationMultiplier,
-                        easing = CubicBezierEasing(0.4f, 0.0f, 0.4f, 1.0f)
-                    )
-                )
-            }
-            targetVerticalMovement = 1f
-            delay(275 * durationMultiplier.toLong())
-            targetVerticalMovement = 0f
-            delay(250 * durationMultiplier.toLong())
-            anagramManager.stepForward()
-
-            if (anagramManager.currentStep < start.length - 1) {
-                updateStep(currentStep + 1)
-                horizontalMovementAnimatable.snapTo(0f)
-
-            }
-        }
-    }
     Layout(content = {
         start.forEach { Text(it.toString(), style = MaterialTheme.typography.h4) }
     }, modifier = Modifier.background(Color.Red)) { measurables, constraint ->
         // TODO: calc exact jump and duck heights needed to clear characters we are pathing around
-        val height = -(jumpHeight * verticalMovement).roundToPx()
+        val height = -(jumpHeight * anagramTransitionData.hopFraction).roundToPx()
         val placeables = measurables.map { it.measure(constraint) }
         val placeablesSorted = anagramManager.getIndexIterator().map { placeables[it] }
 
         // lerp space where moving characters live between the widths of the two characters
         val jumpingPlaceable = placeablesSorted[anagramManager.currentJumpingCharacterIndex]
         val duckingPlaceable = placeablesSorted[anagramManager.currentDuckingCharacterIndex]
-        val jumpPlaceholderWidth = lerp(duckingPlaceable.width, jumpingPlaceable.width, horizontalMovement)
-        val duckPlaceholderWidth = lerp(jumpingPlaceable.width, duckingPlaceable.width, horizontalMovement)
+        val jumpPlaceholderWidth =
+            lerp(duckingPlaceable.width, jumpingPlaceable.width, anagramTransitionData.strafeFraction)
+        val duckPlaceholderWidth =
+            lerp(jumpingPlaceable.width, duckingPlaceable.width, anagramTransitionData.strafeFraction)
 
         // calculate x,y positions for each letter
         val xPos = IntArray(measurables.size + 1) { 0 } // TODO: get rid of + 1
@@ -188,8 +205,8 @@ fun AnimatedAnagram(
         // character horizontal movement
         val jumpStart = xPos[anagramManager.currentDuckingCharacterIndex]
         val jumpEnd = xPos[anagramManager.currentJumpingCharacterIndex]
-        val jumpLerp = lerp(jumpStart, jumpEnd, horizontalMovement)
-        val duckLerp = lerp(jumpEnd, jumpStart, horizontalMovement)
+        val jumpLerp = lerp(jumpStart, jumpEnd, anagramTransitionData.strafeFraction)
+        val duckLerp = lerp(jumpEnd, jumpStart, anagramTransitionData.strafeFraction)
 
         layout(compWidth, compHeight) {
             // TODO: place jump and duck placeable separately from placeables iteration
